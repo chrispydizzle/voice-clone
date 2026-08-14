@@ -103,13 +103,9 @@ def reference_quality_advice(analysis: ReferenceAnalysis) -> str:
     return " ".join(advice)
 
 
-def inspect_reference_ui(
-    reference_audio,
-    language,
-    progress=gr.Progress(),
-):
+def _inspect_reference_outputs(reference_audio, language, progress):
     if not reference_audio:
-        return "", "", ""
+        return None
 
     progress(0.1, desc="Preparing reference audio")
     try:
@@ -131,7 +127,35 @@ def inspect_reference_ui(
     if advice:
         status_parts.append(advice)
     progress(1.0, desc="Reference ready")
-    return result.transcript, quality, " ".join(status_parts)
+    return result, quality, " ".join(status_parts)
+
+
+def inspect_reference_ui(
+    reference_audio,
+    language,
+    progress=gr.Progress(),
+):
+    outputs = _inspect_reference_outputs(reference_audio, language, progress)
+    if outputs is None:
+        return "", "", ""
+
+    result, quality, status = outputs
+    return result.transcript, quality, status
+
+
+def retry_reference_ui(
+    reference_audio,
+    language,
+    current_transcript,
+    progress=gr.Progress(),
+):
+    outputs = _inspect_reference_outputs(reference_audio, language, progress)
+    if outputs is None:
+        return "", "", ""
+
+    result, quality, status = outputs
+    transcript = current_transcript if result.transcription_error else result.transcript
+    return transcript, quality, status
 
 
 CSS = """
@@ -225,8 +249,8 @@ with gr.Blocks(title="Local Voice Clone", css=CSS) as demo:
         outputs=[reference_text, quality_summary, transcription_status],
     )
     transcribe_again.click(
-        fn=inspect_reference_ui,
-        inputs=[reference, language],
+        fn=retry_reference_ui,
+        inputs=[reference, language, reference_text],
         outputs=[reference_text, quality_summary, transcription_status],
     )
     create_button.click(

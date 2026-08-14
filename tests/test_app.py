@@ -79,6 +79,57 @@ def test_inspect_reference_ui_clears_fields_without_audio():
     assert app.inspect_reference_ui(None, "English", FakeProgress()) == ("", "", "")
 
 
+def test_retry_reference_ui_preserves_manual_transcript_on_transcription_error(
+    monkeypatch,
+):
+    result = CaptureInspection(
+        analysis=analysis_fixture(),
+        transcript="",
+        transcription_error="RuntimeError: model unavailable",
+    )
+    monkeypatch.setattr(app, "inspect_reference", lambda source, language: result)
+
+    transcript, quality, status = app.retry_reference_ui(
+        "reference.wav",
+        "English",
+        "Manual correction.",
+        FakeProgress(),
+    )
+
+    assert transcript == "Manual correction."
+    assert "14.2s" in quality
+    assert "Enter the transcript manually" in status
+    assert "model unavailable" in status
+
+
+def test_retry_reference_ui_replaces_manual_transcript_on_success(monkeypatch):
+    result = CaptureInspection(
+        analysis=analysis_fixture(),
+        transcript="Fresh transcript.",
+        transcription_error=None,
+    )
+    monkeypatch.setattr(app, "inspect_reference", lambda source, language: result)
+
+    transcript, quality, status = app.retry_reference_ui(
+        "reference.wav",
+        "English",
+        "Manual correction.",
+        FakeProgress(),
+    )
+
+    assert transcript == "Fresh transcript."
+    assert "14.2s" in quality
+    assert "Transcription complete" in status
+
+
+def test_retry_reference_ui_clears_fields_without_audio():
+    assert app.retry_reference_ui(None, "English", "Manual correction.", FakeProgress()) == (
+        "",
+        "",
+        "",
+    )
+
+
 def test_reference_quality_advice_is_actionable():
     analysis = ReferenceAnalysis(
         duration_seconds=45.0,
@@ -109,3 +160,17 @@ def test_audio_component_preserves_microphone_and_upload_sources():
     )
 
     assert set(reference["props"]["sources"]) == {"microphone", "upload"}
+
+
+def test_language_changes_do_not_trigger_transcription():
+    config = app.demo.get_config_file()
+    language = next(
+        component
+        for component in config["components"]
+        if component["props"].get("label") == "Language"
+    )
+
+    assert all(
+        [language["id"], "change"] not in dependency["targets"]
+        for dependency in config["dependencies"]
+    )
