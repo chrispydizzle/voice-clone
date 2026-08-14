@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+import numpy as np
 import torch
 
 from voice_clone import model
@@ -80,3 +81,35 @@ def test_saved_voice_is_listed_and_deleted(tmp_path, monkeypatch):
     assert torch.equal(loaded.prompt[0].ref_spk_embedding, torch.ones(4))
     assert "Deleted" in model.delete_voice("saved_voice")
     assert model.list_voices() == []
+
+
+class RecordingLock:
+    def __init__(self):
+        self.entered = False
+
+    def __enter__(self):
+        self.entered = True
+
+    def __exit__(self, exc_type, exc, traceback):
+        return False
+
+
+def test_synthesize_uses_shared_accelerator_lock(tmp_path, monkeypatch):
+    lock = RecordingLock()
+    profile = model.VoiceProfile(prompt=["prompt"], language="English")
+
+    class FakeQwenModel:
+        def generate_voice_clone(self, **kwargs):
+            assert lock.entered is True
+            return [np.zeros(24, dtype=np.float32)], 24_000
+
+    monkeypatch.setattr(model, "_load_voice_profile", lambda _: profile)
+    monkeypatch.setattr(model, "_get_model", lambda: FakeQwenModel())
+    monkeypatch.setattr(model, "_output_path", lambda _: tmp_path / "output.wav")
+    monkeypatch.setattr(model, "ACCELERATOR_LOCK", lock)
+    monkeypatch.setattr(model.sf, "write", lambda *args: None)
+
+    output, _ = model.synthesize("Hello", "saved_voice", "English")
+
+    assert output.endswith("output.wav")
+    assert lock.entered is True

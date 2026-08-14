@@ -16,6 +16,7 @@ from voice_clone.core import (
     validate_text,
     validate_voice_id,
 )
+from voice_clone.runtime import ACCELERATOR_LOCK, resolve_device
 
 MODEL_NAME = "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
 VOICE_FORMAT_VERSION = 1
@@ -34,18 +35,11 @@ class VoiceProfile:
 _model = None
 _model_device: str | None = None
 _model_lock = threading.Lock()
-_inference_lock = threading.Lock()
 _voices: dict[str, VoiceProfile] = {}
 
 
 def _device() -> str:
-    requested = os.getenv("VOICE_CLONE_DEVICE")
-    if requested:
-        return requested
-
-    import torch
-
-    return "cuda:0" if torch.cuda.is_available() else "cpu"
+    return resolve_device()
 
 
 def _dtype_for_device(device: str):
@@ -216,7 +210,7 @@ def create_voice(
 
     try:
         model = _get_model()
-        with _inference_lock:
+        with ACCELERATOR_LOCK:
             prompt = model.create_voice_clone_prompt(
                 ref_audio=str(normalized_path),
                 ref_text=clean_reference_text,
@@ -248,7 +242,7 @@ def synthesize(text: str, voice_id: str, language: str) -> tuple[str, str]:
     output_path = _output_path(clean_voice_id)
 
     model = _get_model()
-    with _inference_lock:
+    with ACCELERATOR_LOCK:
         wavs, sample_rate = model.generate_voice_clone(
             text=clean_text,
             language=language,
