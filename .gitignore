@@ -7,3 +7,4 @@ outputs/
 voices/
 readiness-eval-runs/
 .superpowers/
+.worktrees/
