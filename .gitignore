@@ -1,0 +1,8 @@
+.venv/
+.readiness-venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+outputs/
+voices/
+readiness-eval-runs/
