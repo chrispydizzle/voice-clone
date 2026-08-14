@@ -5,19 +5,9 @@ import gradio as gr
 from voice_clone.capture import inspect_reference
 from voice_clone.core import ReferenceAnalysis
 from voice_clone.model import create_voice, delete_voice, list_voices, synthesize
+from voice_clone.transcription import SUPPORTED_LANGUAGES
 
-LANGUAGES = {
-    "English": "English",
-    "Spanish": "Spanish",
-    "French": "French",
-    "German": "German",
-    "Italian": "Italian",
-    "Portuguese": "Portuguese",
-    "Russian": "Russian",
-    "Chinese": "Chinese",
-    "Japanese": "Japanese",
-    "Korean": "Korean",
-}
+LANGUAGES = {language: language for language in SUPPORTED_LANGUAGES}
 
 
 def create_voice_ui(*args):
@@ -151,7 +141,7 @@ def retry_reference_ui(
 ):
     outputs = _inspect_reference_outputs(reference_audio, language, progress)
     if outputs is None:
-        return "", "", ""
+        return current_transcript, "", "Record or upload a reference clip first."
 
     result, quality, status = outputs
     transcript = current_transcript if result.transcription_error else result.transcript
@@ -172,7 +162,11 @@ CSS = """
 """
 
 
-with gr.Blocks(title="Local Voice Clone", css=CSS) as demo:
+with gr.Blocks(
+    title="Local Voice Clone",
+    css=CSS,
+    delete_cache=(3600, 3600),
+) as demo:
     gr.HTML(
         """
         <div class="hero">
@@ -239,8 +233,8 @@ with gr.Blocks(title="Local Voice Clone", css=CSS) as demo:
         speak_status = gr.Markdown()
 
     gr.Markdown(
-        "Powered locally by Qwen3-TTS 1.7B Base (Apache 2.0). Do not use cloned "
-        "speech to impersonate, deceive, or misrepresent another person."
+        "Powered locally by Qwen3-TTS 1.7B Base and Whisper Small. Do not use "
+        "cloned speech to impersonate, deceive, or misrepresent another person."
     )
 
     reference.change(

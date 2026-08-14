@@ -1,4 +1,6 @@
 from dataclasses import dataclass
+import sys
+from types import SimpleNamespace
 
 import numpy as np
 import torch
@@ -86,11 +88,15 @@ def test_saved_voice_is_listed_and_deleted(tmp_path, monkeypatch):
 class RecordingLock:
     def __init__(self):
         self.entered = False
+        self.active = False
 
     def __enter__(self):
         self.entered = True
+        self.active = True
+        return self
 
     def __exit__(self, exc_type, exc, traceback):
+        self.active = False
         return False
 
 
@@ -112,4 +118,82 @@ def test_synthesize_uses_shared_accelerator_lock(tmp_path, monkeypatch):
     output, _ = model.synthesize("Hello", "saved_voice", "English")
 
     assert output.endswith("output.wav")
+    assert lock.entered is True
+
+
+def test_get_model_builds_qwen_inside_shared_accelerator_lock(monkeypatch):
+    lock = RecordingLock()
+
+    class FakeQwenTTSModel:
+        @staticmethod
+        def from_pretrained(*args, **kwargs):
+            assert lock.active is True
+            return "loaded-model"
+
+    monkeypatch.setattr(model, "_model", None)
+    monkeypatch.setattr(model, "_model_device", None)
+    monkeypatch.setattr(model, "_ensure_sox", lambda: None)
+    monkeypatch.setattr(model, "_device", lambda: "cuda:0")
+    monkeypatch.setattr(model, "_dtype_for_device", lambda device: torch.float16)
+    monkeypatch.setattr(model, "ACCELERATOR_LOCK", lock)
+    monkeypatch.setitem(
+        sys.modules,
+        "qwen_tts",
+        SimpleNamespace(Qwen3TTSModel=FakeQwenTTSModel),
+    )
+
+    assert model._get_model() == "loaded-model"
+    assert lock.entered is True
+
+
+def test_create_voice_uses_shared_lock_only_for_qwen_accelerator_work(
+    tmp_path, monkeypatch
+):
+    lock = RecordingLock()
+    normalized = tmp_path / "normalized.wav"
+    output = tmp_path / "preview.wav"
+    calls = []
+
+    class FakeQwenModel:
+        def create_voice_clone_prompt(self, **kwargs):
+            calls.append("prompt")
+            assert lock.active is True
+            return ["prompt"]
+
+        def generate_voice_clone(self, **kwargs):
+            calls.append("generate")
+            assert lock.active is True
+            return [np.zeros(24, dtype=np.float32)], 24_000
+
+    def write_output(*args):
+        calls.append("write")
+        assert lock.active is False
+
+    def save_profile(voice_id, profile):
+        calls.append("save")
+        assert lock.active is False
+        assert voice_id == "saved_voice"
+        assert profile.language == "English"
+
+    monkeypatch.setattr(model, "normalize_reference", lambda _: (normalized, 12.0))
+    monkeypatch.setattr(model, "_output_path", lambda _: output)
+    monkeypatch.setattr(model, "_get_model", lambda: FakeQwenModel())
+    monkeypatch.setattr(model, "_save_voice_profile", save_profile)
+    monkeypatch.setattr(model, "_voices", {})
+    monkeypatch.setattr(model, "ACCELERATOR_LOCK", lock)
+    monkeypatch.setattr(model.sf, "write", write_output)
+    monkeypatch.setattr(model, "model_device", lambda: "cuda:0")
+
+    audio, voice_id, status = model.create_voice(
+        "reference.wav",
+        "Reference text.",
+        "saved_voice",
+        "English",
+        True,
+    )
+
+    assert audio == str(output)
+    assert voice_id == "saved_voice"
+    assert "12.0s" in status
+    assert calls == ["prompt", "generate", "write", "save"]
     assert lock.entered is True

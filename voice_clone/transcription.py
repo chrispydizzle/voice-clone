@@ -12,6 +12,8 @@ from voice_clone.runtime import ACCELERATOR_LOCK, resolve_device
 
 TRANSCRIPTION_MODEL_NAME = "openai/whisper-small"
 WHISPER_SAMPLE_RATE = 16_000
+MAX_CHUNK_SECONDS = 30
+MAX_CHUNK_SAMPLES = WHISPER_SAMPLE_RATE * MAX_CHUNK_SECONDS
 SUPPORTED_LANGUAGES = {
     "English": "english",
     "Spanish": "spanish",
@@ -52,13 +54,13 @@ def _build_transcriber() -> TranscriberBundle:
     device = _transcription_device()
     dtype = _transcription_dtype(device)
     processor = AutoProcessor.from_pretrained(TRANSCRIPTION_MODEL_NAME)
-    model = AutoModelForSpeechSeq2Seq.from_pretrained(
-        TRANSCRIPTION_MODEL_NAME,
-        torch_dtype=dtype,
-        low_cpu_mem_usage=True,
-        use_safetensors=True,
-        attn_implementation="sdpa",
-    ).to(device)
+    with ACCELERATOR_LOCK:
+        model = AutoModelForSpeechSeq2Seq.from_pretrained(
+            TRANSCRIPTION_MODEL_NAME,
+            dtype=dtype,
+            use_safetensors=True,
+            attn_implementation="sdpa",
+        ).to(device)
     model.eval()
     return TranscriberBundle(
         model=model,
@@ -99,6 +101,11 @@ def _resample_audio(audio: np.ndarray, sample_rate: int) -> np.ndarray:
     return waveform.numpy()
 
 
+def _chunks(samples: np.ndarray):
+    for start in range(0, len(samples), MAX_CHUNK_SAMPLES):
+        yield samples[start : start + MAX_CHUNK_SAMPLES]
+
+
 def transcribe(audio: np.ndarray, sample_rate: int, language: str) -> str:
     whisper_language = SUPPORTED_LANGUAGES.get(language)
     if whisper_language is None:
@@ -106,22 +113,26 @@ def transcribe(audio: np.ndarray, sample_rate: int, language: str) -> str:
 
     samples = _resample_audio(audio, sample_rate)
     bundle = _get_transcriber()
-    input_features = bundle.processor(
-        samples,
-        sampling_rate=WHISPER_SAMPLE_RATE,
-        return_tensors="pt",
-    ).input_features
+    decoded_chunks = []
+    for chunk in _chunks(samples):
+        input_features = bundle.processor(
+            chunk,
+            sampling_rate=WHISPER_SAMPLE_RATE,
+            return_tensors="pt",
+        ).input_features
 
-    with ACCELERATOR_LOCK, torch.inference_mode():
-        features = input_features.to(bundle.device, dtype=bundle.dtype)
-        generated_ids = bundle.model.generate(
-            features,
-            language=whisper_language,
-            task="transcribe",
+        with ACCELERATOR_LOCK, torch.inference_mode():
+            features = input_features.to(bundle.device, dtype=bundle.dtype)
+            generated_ids = bundle.model.generate(
+                features,
+                language=whisper_language,
+                task="transcribe",
+            ).cpu()
+
+        decoded_chunks.append(
+            bundle.processor.batch_decode(
+                generated_ids,
+                skip_special_tokens=True,
+            )[0]
         )
-
-    decoded = bundle.processor.batch_decode(
-        generated_ids,
-        skip_special_tokens=True,
-    )[0]
-    return normalize_transcript(decoded)
+    return normalize_transcript(" ".join(decoded_chunks))

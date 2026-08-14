@@ -15,6 +15,12 @@ Use Windows 10 or 11 with Python 3.12:
 The test suite does not download model weights or require a GPU. FFmpeg is used
 by the audio-normalization tests.
 
+Set `VOICE_CLONE_DEVICE` to choose the Qwen device for cloning and synthesis.
+Set `VOICE_CLONE_TRANSCRIBE_DEVICE` only when Whisper Small transcription
+should use a different device; PyTorch and Torchaudio are installed by
+`setup.ps1` from the selected CPU or CUDA package index and are intentionally
+not listed in `requirements.txt`.
+
 ## Pull requests
 
 1. Keep changes focused and include tests for changed behavior.

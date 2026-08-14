@@ -1,3 +1,4 @@
+import sys
 from types import SimpleNamespace
 
 import numpy as np
@@ -108,6 +109,82 @@ def test_transcribe_uses_language_lock_and_inference_mode(monkeypatch):
     assert events == ["lock-enter", "to", "generate", "lock-exit"]
 
 
+def test_transcribe_chunks_long_audio_and_concatenates_all_text(monkeypatch):
+    chunk_lengths = []
+
+    class ChunkProcessor:
+        def __call__(self, audio, sampling_rate, return_tensors):
+            assert sampling_rate == transcription.WHISPER_SAMPLE_RATE
+            assert return_tensors == "pt"
+            chunk_lengths.append(len(audio))
+            return SimpleNamespace(input_features=torch.ones(1, 80, 10))
+
+        def batch_decode(self, generated_ids, skip_special_tokens):
+            assert skip_special_tokens is True
+            return [f" chunk-{int(generated_ids.item())} "]
+
+    class ChunkModel:
+        def __init__(self):
+            self.calls = 0
+
+        def generate(self, input_features, **kwargs):
+            self.calls += 1
+            return torch.tensor([[self.calls]])
+
+    bundle = transcription.TranscriberBundle(
+        model=ChunkModel(),
+        processor=ChunkProcessor(),
+        device="cpu",
+        dtype=torch.float32,
+    )
+    monkeypatch.setattr(transcription, "_get_transcriber", lambda: bundle)
+
+    audio = np.zeros(transcription.WHISPER_SAMPLE_RATE * 60, dtype=np.float32)
+
+    text = transcription.transcribe(audio, transcription.WHISPER_SAMPLE_RATE, "English")
+
+    assert chunk_lengths == [
+        transcription.WHISPER_SAMPLE_RATE * 30,
+        transcription.WHISPER_SAMPLE_RATE * 30,
+    ]
+    assert text == "chunk-1 chunk-2"
+
+
+def test_transcribe_moves_generated_ids_to_cpu_inside_shared_lock(monkeypatch):
+    events = []
+    lock = RecordingLock(events)
+
+    class GeneratedIds:
+        def cpu(self):
+            events.append("cpu")
+            assert lock.active is True
+            return "cpu-ids"
+
+    class CpuProcessor(FakeProcessor):
+        def batch_decode(self, generated_ids, skip_special_tokens):
+            assert generated_ids == "cpu-ids"
+            return ["done"]
+
+    class CpuModel(FakeModel):
+        def generate(self, input_features, **kwargs):
+            events.append("generate")
+            return GeneratedIds()
+
+    bundle = transcription.TranscriberBundle(
+        model=CpuModel(),
+        processor=CpuProcessor(input_features=FakeInputFeatures(events, lock)),
+        device="cpu",
+        dtype=torch.float32,
+    )
+    monkeypatch.setattr(transcription, "_get_transcriber", lambda: bundle)
+    monkeypatch.setattr(transcription, "ACCELERATOR_LOCK", lock)
+
+    assert transcription.transcribe(
+        np.zeros(16_000, dtype=np.float32), 16_000, "English"
+    ) == "done"
+    assert events == ["lock-enter", "to", "generate", "cpu", "lock-exit"]
+
+
 def test_transcribe_rejects_unsupported_language():
     with pytest.raises(ValueError, match="Unsupported transcription language"):
         transcription.transcribe(
@@ -128,6 +205,59 @@ def test_get_transcriber_builds_once(monkeypatch):
     assert transcription._get_transcriber() is sentinel
     assert transcription._get_transcriber() is sentinel
     assert calls == ["build"]
+
+
+def test_build_transcriber_places_model_on_device_inside_shared_lock(monkeypatch):
+    events = []
+    lock = RecordingLock(events)
+    from_pretrained_kwargs = {}
+
+    class FakeAutoProcessor:
+        @staticmethod
+        def from_pretrained(model_name):
+            assert model_name == transcription.TRANSCRIPTION_MODEL_NAME
+            return object()
+
+    class FakeWhisperModel:
+        def to(self, device):
+            events.append("to")
+            assert lock.active is True
+            assert device == "cuda:0"
+            return self
+
+        def eval(self):
+            events.append("eval")
+            return self
+
+    class FakeAutoModelForSpeechSeq2Seq:
+        @staticmethod
+        def from_pretrained(model_name, **kwargs):
+            events.append("from_pretrained")
+            assert lock.active is True
+            assert model_name == transcription.TRANSCRIPTION_MODEL_NAME
+            from_pretrained_kwargs.update(kwargs)
+            return FakeWhisperModel()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "transformers",
+        SimpleNamespace(
+            AutoModelForSpeechSeq2Seq=FakeAutoModelForSpeechSeq2Seq,
+            AutoProcessor=FakeAutoProcessor,
+        ),
+    )
+    monkeypatch.setattr(transcription, "ACCELERATOR_LOCK", lock)
+    monkeypatch.setattr(transcription, "_transcription_device", lambda: "cuda:0")
+    monkeypatch.setattr(transcription, "_transcription_dtype", lambda device: torch.float16)
+
+    bundle = transcription._build_transcriber()
+
+    assert bundle.device == "cuda:0"
+    assert bundle.dtype == torch.float16
+    assert events == ["lock-enter", "from_pretrained", "to", "lock-exit", "eval"]
+    assert from_pretrained_kwargs["dtype"] == torch.float16
+    assert "torch_dtype" not in from_pretrained_kwargs
+    assert "low_cpu_mem_usage" not in from_pretrained_kwargs
 
 
 def test_transcription_and_qwen_share_accelerator_lock():

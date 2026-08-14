@@ -122,12 +122,17 @@ def test_retry_reference_ui_replaces_manual_transcript_on_success(monkeypatch):
     assert "Transcription complete" in status
 
 
-def test_retry_reference_ui_clears_fields_without_audio():
-    assert app.retry_reference_ui(None, "English", "Manual correction.", FakeProgress()) == (
-        "",
-        "",
-        "",
+def test_retry_reference_ui_preserves_transcript_and_clears_quality_without_audio():
+    transcript, quality, status = app.retry_reference_ui(
+        None,
+        "English",
+        "Manual correction.",
+        FakeProgress(),
     )
+
+    assert transcript == "Manual correction."
+    assert quality == ""
+    assert "Record or upload a reference clip first." in status
 
 
 def test_reference_quality_advice_is_actionable():
@@ -164,13 +169,30 @@ def test_audio_component_preserves_microphone_and_upload_sources():
 
 def test_language_changes_do_not_trigger_transcription():
     config = app.demo.get_config_file()
+    reference = next(
+        component
+        for component in config["components"]
+        if component["props"].get("label")
+        == "Reference recording (10-30 seconds recommended)"
+    )
     language = next(
         component
         for component in config["components"]
         if component["props"].get("label") == "Language"
     )
-
-    assert all(
-        [language["id"], "change"] not in dependency["targets"]
+    dependency_targets = {
+        tuple(target)
         for dependency in config["dependencies"]
-    )
+        for target in dependency["targets"]
+    }
+
+    assert (reference["id"], "change") in dependency_targets
+    assert (language["id"], "change") not in dependency_targets
+
+
+def test_demo_uses_periodic_gradio_cache_cleanup():
+    assert app.demo.delete_cache == (3600, 3600)
+
+
+def test_ui_languages_derive_from_transcription_languages():
+    assert list(app.LANGUAGES) == list(app.SUPPORTED_LANGUAGES)

@@ -78,12 +78,13 @@ def _get_model():
             from qwen_tts import Qwen3TTSModel
 
             _model_device = _device()
-            _model = Qwen3TTSModel.from_pretrained(
-                MODEL_NAME,
-                device_map=_model_device,
-                dtype=_dtype_for_device(_model_device),
-                attn_implementation="sdpa",
-            )
+            with ACCELERATOR_LOCK:
+                _model = Qwen3TTSModel.from_pretrained(
+                    MODEL_NAME,
+                    device_map=_model_device,
+                    dtype=_dtype_for_device(_model_device),
+                    attn_implementation="sdpa",
+                )
     return _model
 
 
@@ -221,10 +222,10 @@ def create_voice(
                 language=language,
                 voice_clone_prompt=prompt,
             )
-            sf.write(output_path, wavs[0], sample_rate)
-            profile = VoiceProfile(prompt=prompt, language=language)
-            _save_voice_profile(clean_voice_id, profile)
-            _voices[clean_voice_id] = profile
+        sf.write(output_path, wavs[0], sample_rate)
+        profile = VoiceProfile(prompt=prompt, language=language)
+        _save_voice_profile(clean_voice_id, profile)
+        _voices[clean_voice_id] = profile
     finally:
         normalized_path.unlink(missing_ok=True)
 
