@@ -20,6 +20,11 @@ facilitate impersonation, fraud, harassment, and misinformation.
 
 ## Privacy notes
 
+Automatic transcription runs locally after the Whisper model is cached.
+Normalized reference audio is temporary and is deleted after transcription or
+voice creation. Review the generated transcript before saving a voice because
+the corrected reference transcript is embedded in the persisted voice profile.
+
 Saved files under `voices\` contain voice embeddings and the exact reference
 transcript. Treat them as sensitive biometric-like data. Generated speech is
 stored under `outputs\`. Both directories are excluded from Git by default,
@@ -28,4 +33,3 @@ but they are not encrypted.
 The consent checkbox is a reminder, not a technical verification mechanism.
 This project does not add an audible disclosure or provenance watermark to
 generated audio.
-

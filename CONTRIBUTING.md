@@ -26,3 +26,16 @@ by the audio-normalization tests.
 By contributing, you agree that your contribution is licensed under the MIT
 License.
 
+## Manual voice-wizard verification
+
+Before submitting changes to capture or transcription behavior:
+
+1. Test one microphone recording and one uploaded audio file.
+2. Confirm automatic transcription remains editable.
+3. Confirm quiet and clipped audio display warnings.
+4. Confirm a transcription failure still allows manual transcript entry.
+5. Create a voice, restart the app, and synthesize with the saved profile.
+6. After both models are cached, disconnect networking and repeat the workflow.
+
+Never commit the recordings, transcripts, generated speech, or saved profiles
+used for this verification.
