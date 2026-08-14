@@ -1,6 +1,6 @@
 # Instant Clone Wizard Design
 
-**Status:** Approved  
+**Status:** Approved
 **Date:** 2026-08-13
 
 ## Goal
