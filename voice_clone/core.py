@@ -35,6 +35,12 @@ class ReferenceAnalysis:
 
 @dataclass(frozen=True)
 class PreparedReference:
+    """Normalized reference audio and its analysis.
+
+    The returned ``path`` is a caller-owned temporary WAV. Callers must unlink
+    it after use, even when later processing fails.
+    """
+
     path: Path
     analysis: ReferenceAnalysis
 
@@ -114,6 +120,12 @@ def validate_text(text: str) -> str:
 
 
 def prepare_reference(source: str | Path) -> PreparedReference:
+    """Normalize a reference clip and return the temp file plus analysis.
+
+    The returned temporary WAV is owned by the caller and must be unlinked
+    after the reference is consumed.
+    """
+
     source_path = Path(source)
     if not source_path.is_file():
         raise ValueError("Record or upload a reference audio clip first.")
@@ -175,5 +187,7 @@ def prepare_reference(source: str | Path) -> PreparedReference:
 
 
 def normalize_reference(source: str | Path) -> tuple[Path, float]:
+    """Backward-compatible wrapper returning a caller-owned temp path."""
+
     prepared = prepare_reference(source)
     return prepared.path, prepared.analysis.duration_seconds

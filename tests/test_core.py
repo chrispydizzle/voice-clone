@@ -5,6 +5,8 @@ import pytest
 import soundfile as sf
 
 from voice_clone.core import (
+    _clipping_rating,
+    _level_rating,
     analyze_waveform,
     normalize_reference,
     prepare_reference,
@@ -16,6 +18,22 @@ from voice_clone.core import (
 def sine_wave(amplitude: float, seconds: int = 10, sample_rate: int = 24_000):
     time = np.arange(sample_rate * seconds) / sample_rate
     return amplitude * np.sin(2 * np.pi * 220 * time)
+
+
+@pytest.mark.parametrize(
+    ("rms_dbfs", "expected"),
+    [(-40, "caution"), (-30, "good"), (-10, "good"), (-3, "caution")],
+)
+def test_level_rating_respects_rms_boundaries(rms_dbfs, expected):
+    assert _level_rating(rms_dbfs) == expected
+
+
+@pytest.mark.parametrize(
+    ("clipping_ratio", "expected"),
+    [(0.0, "good"), (0.001, "caution"), (0.01, "poor")],
+)
+def test_clipping_rating_respects_boundaries(clipping_ratio, expected):
+    assert _clipping_rating(clipping_ratio) == expected
 
 
 def test_analyze_waveform_rates_clean_reference_good():
@@ -89,6 +107,7 @@ def test_normalize_reference_accepts_audible_audio(tmp_path: Path):
     try:
         assert prepared.analysis.duration_seconds == pytest.approx(seconds, abs=0.05)
         assert prepared.analysis.level_rating == "good"
+        assert prepared.analysis.clipping_ratio == 0.0
         info = sf.info(prepared.path)
         assert info.channels == 1
         assert info.samplerate == 24_000
