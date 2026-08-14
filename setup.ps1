@@ -6,6 +6,27 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Add-WinGetToolToPath {
+    param(
+        [string]$Command,
+        [string]$PackagePattern
+    )
+
+    if (Get-Command $Command -ErrorAction SilentlyContinue) {
+        return
+    }
+
+    $packageRoot = "$env:LOCALAPPDATA\Microsoft\WinGet\Packages"
+    $tool = Get-ChildItem $packageRoot -Directory -Filter $PackagePattern -ErrorAction SilentlyContinue |
+        ForEach-Object {
+            Get-ChildItem $_.FullName -File -Filter "$Command.exe" -Recurse -ErrorAction SilentlyContinue
+        } |
+        Select-Object -First 1
+    if ($tool) {
+        $env:PATH = "$($tool.DirectoryName);$env:PATH"
+    }
+}
+
 function Install-SystemPackage {
     param(
         [string]$Command,
@@ -38,6 +59,9 @@ if (-not (Test-Path ".venv\Scripts\python.exe")) {
 
 $venvPython = Resolve-Path ".venv\Scripts\python.exe"
 & $venvPython -m pip install --upgrade pip
+
+Add-WinGetToolToPath -Command "ffmpeg" -PackagePattern "Gyan.FFmpeg_*"
+Add-WinGetToolToPath -Command "sox" -PackagePattern "ChrisBagwell.SoX_*"
 
 Install-SystemPackage -Command "ffmpeg" -PackageId "Gyan.FFmpeg"
 Install-SystemPackage -Command "sox" -PackageId "ChrisBagwell.SoX"
