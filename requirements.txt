@@ -1,6 +1,6 @@
-gradio==6.15.1
-numpy>=1.26,<3
+gradio==6.22.0
+numpy>=2.5.2,<3
 qwen-tts==0.1.1
-requests>=2,<3
-soundfile>=0.12,<1
-transformers==4.57.3
+requests>=2.34.2,<3
+soundfile>=0.14.0,<1
+transformers==5.15.0
