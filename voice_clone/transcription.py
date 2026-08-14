@@ -106,13 +106,14 @@ def transcribe(audio: np.ndarray, sample_rate: int, language: str) -> str:
 
     samples = _resample_audio(audio, sample_rate)
     bundle = _get_transcriber()
-    features = bundle.processor(
+    input_features = bundle.processor(
         samples,
         sampling_rate=WHISPER_SAMPLE_RATE,
         return_tensors="pt",
-    ).input_features.to(bundle.device, dtype=bundle.dtype)
+    ).input_features
 
     with ACCELERATOR_LOCK, torch.inference_mode():
+        features = input_features.to(bundle.device, dtype=bundle.dtype)
         generated_ids = bundle.model.generate(
             features,
             language=whisper_language,
